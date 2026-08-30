@@ -1,0 +1,15 @@
+artifacts/
+packages/
+dist/
+src/**/obj/
+src/**/bin/
+third_party/LibreHardwareMonitor-v0.9.6/
+TurzxControl/
+.vs/
+*.user
+*.suo
+*.pdb
+*.log
+*.tmp
+/release/*/Images/*
+/release/*/Theme/*

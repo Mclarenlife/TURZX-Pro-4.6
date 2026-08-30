@@ -1,0 +1,113 @@
+<Window x:Class="Turzx.Desktop.ComponentCustomizerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="组件设置" Width="600" Height="500"
+        MinWidth="600" MaxWidth="600" MinHeight="500" MaxHeight="500"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource ApplicationBackgroundBrush}">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="14"/>
+            <RowDefinition Height="42"/>
+        </Grid.RowDefinitions>
+
+        <ui:Card Grid.Row="0" Padding="20">
+            <ScrollViewer VerticalScrollBarVisibility="Hidden">
+                <StackPanel>
+                    <TextBlock Text="通用" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="图层名称" Margin="0,12,0,4" Opacity="0.65"/>
+                    <TextBox x:Name="ComponentNameText" Height="36"/>
+
+                    <StackPanel x:Name="TextSection" Visibility="Collapsed" Margin="0,20,0,0">
+                        <Separator Margin="0,0,0,16"/>
+                        <TextBlock Text="文字内容" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="显示文字" Margin="0,12,0,4" Opacity="0.65"/>
+                        <TextBox x:Name="TextContentText" Height="36"/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="TimeSection" Visibility="Collapsed" Margin="0,20,0,0">
+                        <Separator Margin="0,0,0,16"/>
+                        <TextBlock Text="时间格式" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="可选择预设，也可以直接输入 .NET 时间格式。" Margin="0,7,0,8" Opacity="0.65"/>
+                        <ComboBox x:Name="TimeFormatCombo" Height="36" IsEditable="True">
+                            <ComboBoxItem Content="HH:mm:ss"/>
+                            <ComboBoxItem Content="HH:mm"/>
+                            <ComboBoxItem Content="HH:mm [dddd]"/>
+                            <ComboBoxItem Content="HH:mm:ss [dddd]"/>
+                            <ComboBoxItem Content="MM-dd"/>
+                            <ComboBoxItem Content="MM-dd dddd"/>
+                            <ComboBoxItem Content="MM-dd HH:mm"/>
+                            <ComboBoxItem Content="yyyy-MM-dd"/>
+                            <ComboBoxItem Content="yyyy-MM-dd HH:mm"/>
+                            <ComboBoxItem Content="yyyy/MM/dd"/>
+                            <ComboBoxItem Content="yyyy/MM/dd HH:mm"/>
+                            <ComboBoxItem Content="yyyy年MM月dd日"/>
+                            <ComboBoxItem Content="MM月dd日 dddd"/>
+                        </ComboBox>
+                        <TextBlock Text="示例：HH:mm:ss 显示时分秒，HH:mm 只显示时分。" Margin="0,8,0,0" FontSize="11" Opacity="0.55"/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="WeatherSection" Visibility="Collapsed" Margin="0,20,0,0">
+                        <Separator Margin="0,0,0,16"/>
+                        <TextBlock Text="天气内容" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="选择需要显示的部分，内容会自动组合。" Margin="0,7,0,10" Opacity="0.65"/>
+                        <WrapPanel>
+                            <CheckBox x:Name="WeatherIconCheck" Content="天气图标" Margin="0,0,24,10"/>
+                            <CheckBox x:Name="WeatherLocationCheck" Content="城市" Margin="0,0,24,10"/>
+                            <CheckBox x:Name="WeatherTemperatureCheck" Content="温度" Margin="0,0,24,10"/>
+                            <CheckBox x:Name="WeatherConditionCheck" Content="天气文字" Margin="0,0,24,10"/>
+                            <CheckBox x:Name="WeatherSeparatorCheck" Content="显示间隔点（珠海 · 26℃）" Margin="0,0,24,10"/>
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SensorSection" Visibility="Collapsed" Margin="0,20,0,0">
+                        <Separator Margin="0,0,0,16"/>
+                        <TextBlock Text="监控数值" FontSize="16" FontWeight="SemiBold"/>
+                        <CheckBox x:Name="SensorLabelCheck" Content="显示监控项名称" Margin="0,12,0,0"/>
+                        <TextBlock Text="数值小数位" Margin="0,12,0,4" Opacity="0.65"/>
+                        <ComboBox x:Name="SensorDecimalCombo" Height="36">
+                            <ComboBoxItem Content="0 位" Tag="0"/>
+                            <ComboBoxItem Content="1 位" Tag="1"/>
+                            <ComboBoxItem Content="2 位" Tag="2"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel x:Name="ProgressSection" Visibility="Collapsed" Margin="0,20,0,0">
+                        <Separator Margin="0,0,0,16"/>
+                        <TextBlock Text="进度条" FontSize="16" FontWeight="SemiBold"/>
+                        <CheckBox x:Name="ProgressLabelCheck" Content="显示名称与实时数值" Margin="0,12,0,10"/>
+                        <TextBlock Text="实时数值小数位" Opacity="0.65"/>
+                        <ComboBox x:Name="ProgressDecimalCombo" Height="36" Margin="0,4,0,12">
+                            <ComboBoxItem Content="0 位" Tag="0"/>
+                            <ComboBoxItem Content="1 位" Tag="1"/>
+                            <ComboBoxItem Content="2 位" Tag="2"/>
+                        </ComboBox>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="进度条长度" Opacity="0.65"/><TextBox x:Name="ProgressWidthText" Height="36"/></StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock Text="粗细" Opacity="0.65"/><TextBox x:Name="ProgressThicknessText" Height="36"/></StackPanel>
+                        </Grid>
+                        <TextBlock Text="样式" Margin="0,12,0,4" Opacity="0.65"/>
+                        <ComboBox x:Name="ProgressStyleCombo" Height="36">
+                            <ComboBoxItem Content="圆角" Tag="Rounded"/>
+                            <ComboBoxItem Content="直角" Tag="Flat"/>
+                            <ComboBoxItem Content="分段" Tag="Segmented"/>
+                        </ComboBox>
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="进度颜色" Opacity="0.65"/><ui:Button x:Name="ProgressColorButton" Height="36" Click="ProgressColor_Click" HorizontalContentAlignment="Stretch"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition/></Grid.ColumnDefinitions><Border x:Name="ProgressColorSwatch" Width="22" Height="22" CornerRadius="6"/><TextBlock Grid.Column="1" Text="选择" VerticalAlignment="Center"/></Grid></ui:Button></StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock Text="轨道颜色" Opacity="0.65"/><ui:Button x:Name="ProgressTrackColorButton" Height="36" Click="ProgressTrackColor_Click" HorizontalContentAlignment="Stretch"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition/></Grid.ColumnDefinitions><Border x:Name="ProgressTrackColorSwatch" Width="22" Height="22" CornerRadius="6"/><TextBlock Grid.Column="1" Text="选择" VerticalAlignment="Center"/></Grid></ui:Button></StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </ui:Card>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <ui:Button Content="取消" Width="90" Height="40" Click="Cancel_Click"/>
+            <ui:Button Content="应用" Width="100" Height="40" Margin="8,0,0,0" Appearance="Primary" Click="Apply_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
