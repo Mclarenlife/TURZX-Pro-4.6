@@ -6,7 +6,8 @@
 
 推荐下载 `TURZX-Pro-v1.0-Setup.exe`。免安装使用可下载 `TURZX-Pro-v1.0-win-x64.zip`。
 
+可选下载 `TURZX-Pro-v1.0-Theme-black1.zip` 黑白硬件监控主题。将包内 `Theme` 文件夹解压到软件目录并合并，重启软件后在主题预设中选择 `black1`。
+
 安装前请退出 TURZX 原厂控制软件。硬件温度和功耗等高级传感器需要在设置中由用户主动安装 PawnIO 与 TURZX 本地传感器服务。
 
 v1.0 暂未使用商业代码签名证书，Windows 可能显示“未知发布者”。请使用 Release 中的 `SHA256SUMS.txt` 校验下载文件。
-
