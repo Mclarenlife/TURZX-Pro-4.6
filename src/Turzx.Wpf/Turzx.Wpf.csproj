@@ -105,6 +105,9 @@
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="MainWindow.Automation.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="ComponentCustomizerWindow.xaml.cs">
       <DependentUpon>ComponentCustomizerWindow.xaml</DependentUpon>
     </Compile>
@@ -115,15 +118,19 @@
       <DependentUpon>PromptLibraryWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="Models\EditorModels.cs" />
+    <Compile Include="Models\AutomationModels.cs" />
     <Compile Include="Services\SensorCatalogService.cs" />
     <Compile Include="Services\SensorBridgeClient.cs" />
     <Compile Include="Services\SensorMappingStore.cs" />
     <Compile Include="Services\SensorServiceManager.cs" />
     <Compile Include="Services\StartupManager.cs" />
+    <Compile Include="Services\OutputSessionStore.cs" />
+    <Compile Include="Services\AutomationStore.cs" />
     <Compile Include="Services\WeatherService.cs" />
     <Compile Include="Services\WeatherSettingsStore.cs" />
     <Compile Include="Services\AiImageService.cs" />
     <Compile Include="Services\AiImageSettingsStore.cs" />
+    <Compile Include="Services\DisplaySettingsStore.cs" />
     <Compile Include="Services\ThemeProjectStore.cs" />
     <Compile Include="..\Turzx.ProtocolProbe\WinUsbDevice.cs">
       <Link>Backend\WinUsbDevice.cs</Link>

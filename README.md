@@ -1,8 +1,8 @@
 # TURZX Pro 4.6
 
-![版本](https://img.shields.io/badge/version-v1.0-2f81f7) ![平台](https://img.shields.io/badge/platform-Windows%20x64-111827) ![屏幕](https://img.shields.io/badge/display-960%C3%97320-0ea5e9)
+![版本](https://img.shields.io/badge/version-v1.1-2f81f7) ![平台](https://img.shields.io/badge/platform-Windows%20x64-111827) ![屏幕](https://img.shields.io/badge/display-960%C3%97320-0ea5e9)
 
-一款面向 **TURZX 4.6 英寸 USB 副屏**的现代化 Windows 控制软件。支持图片、视频、实时硬件监控、可视化主题编辑和 AI 背景创作，并提供深浅色界面、开机启动与系统托盘。
+一款面向 **TURZX 4.6 英寸 USB 副屏**的现代化 Windows 控制软件。支持图片、视频、实时硬件监控、可视化主题编辑、AI 背景创作和自动化规则，并提供深浅色界面、开机启动与系统托盘。
 
 > 本项目是独立开发的软件，并非 TURZX 原厂软件。当前版本针对 USB `VID 1CBE / PID 0046`、逻辑分辨率 `960 × 320` 的横置屏幕开发。
 
@@ -17,6 +17,9 @@
 - **AI 创意背景**：兼容 OpenAI Images 风格接口与阿里云百炼 Qwen Image 原生接口，内置多类 960 × 320 提示词模板。
 - **主题预设**：主题会同时保存组件、背景和媒体素材，可直接载入复用。
 - **后台运行**：关闭窗口后最小化到系统托盘；支持开机启动。
+- **自动化规则**：支持指定时间、时间范围内固定间隔和程序启动触发，可串联提醒、等待、图片、视频与主题动作。
+- **屏幕提醒**：支持普通及强提醒配色，可选择慢、快、超快三档闪动速度。
+- **显示调节**：支持硬件亮度，以及统一作用于全部输出内容的色温和色调调节。
 - **本地安全**：不内置任何 API Key，不收集遥测；API Key 使用 Windows DPAPI 按当前用户加密保存在本机。
 
 ## 界面预览
@@ -42,7 +45,7 @@
 
 ## 下载与安装
 
-1. 打开仓库右侧的 **Releases**，下载 `TURZX-Pro-v1.0-Setup.exe`。
+1. 打开仓库右侧的 **Releases**，下载 `TURZX-Pro-v1.1-Setup.exe`。
 2. 退出 TURZX 原厂控制软件，避免两个程序同时占用 USB 设备。
 3. 运行安装程序，然后启动 **TURZX Pro 4.6**。
 4. 将屏幕通过 USB 连接到电脑，软件会自动检查设备。
@@ -50,16 +53,16 @@
 
 也可以下载 Release 中的便携版 ZIP，解压后运行 `Turzx.ControlPanel.Wpf.exe`。
 
-Release 还提供 `TURZX-Pro-v1.0-Theme-black1.zip` 黑白硬件监控主题。将其中的 `Theme` 文件夹解压到软件目录并合并，重启软件后即可在“监控主题编辑器 → 主题预设”中选择 `black1`。
+Release 还提供 `TURZX-Pro-v1.1-Theme-black1.zip` 黑白硬件监控主题。将其中的 `Theme` 文件夹解压到软件目录并合并，重启软件后即可在“监控主题编辑器 → 主题预设”中选择 `black1`。
 
-> v1.0 暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。请只从本仓库 Release 下载，并使用随 Release 提供的 `SHA256SUMS.txt` 校验文件完整性。
+> v1.1 暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。请只从本仓库 Release 下载，并使用随 Release 提供的 `SHA256SUMS.txt` 校验文件完整性。
 
 ### 运行环境
 
 - Windows 10 / Windows 11 x64
 - .NET Framework 4.7.2 或更高版本
 - TURZX 4.6 英寸屏幕（当前测试设备：`VID 1CBE / PID 0046`）
-- 视频输出需要 FFmpeg：将 `ffmpeg.exe` 放在软件目录或 `ffmpeg` 子目录中，亦可安装到系统 `PATH`
+- 正式版已内置 FFmpeg 视频解码器
 
 ## 第一次使用
 
@@ -68,6 +71,7 @@ Release 还提供 `TURZX-Pro-v1.0-Theme-black1.zip` 黑白硬件监控主题。�
 - **black1 主题**：安装 Release 中的主题包后，在主题预设中选择 `black1`；不同电脑可在传感器设置中重新映射硬件数据。
 - **天气**：在设置中填写城市并保存。
 - **AI 背景**：在设置中填写自己的 API 地址、API Key 和模型。项目及安装包不包含开发者密钥。
+- **自动化**：创建规则后选择触发条件与一个或多个执行动作；间隔规则以开始时间为固定计时基准。
 - **退出软件**：关闭窗口只会进入托盘；在托盘图标上点击右键并选择“退出软件”才能彻底退出。
 
 ## 隐私与安全
@@ -96,10 +100,10 @@ Release 还提供 `TURZX-Pro-v1.0-Theme-black1.zip` 黑白硬件监控主题。�
 - [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
 - [PawnIO](https://pawnio.eu/)（可选硬件传感器驱动）
 - [Open-Meteo](https://open-meteo.com/)（天气数据）
-- [FFmpeg](https://ffmpeg.org/)（视频解码，需用户自行提供）
+- [FFmpeg](https://ffmpeg.org/)（正式版内置，用于视频解码）
 
 相关许可证和第三方声明随正式版一同放在 `licenses` 目录。
 
 ## 版本
 
-当前正式版本：**v1.0**。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
+当前正式版本：**v1.1**。更新内容见 [CHANGELOG.md](CHANGELOG.md)。

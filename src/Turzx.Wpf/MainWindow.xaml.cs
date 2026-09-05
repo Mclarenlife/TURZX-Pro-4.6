@@ -32,6 +32,17 @@ namespace Turzx.Desktop
         private const ushort VendorId = 0x1CBE;
         private const ushort ProductId = 0x0046;
 
+        private sealed class MediaLibraryItem
+        {
+            public string Name { get; set; }
+            public string FullPath { get; set; }
+
+            public override string ToString()
+            {
+                return Name ?? string.Empty;
+            }
+        }
+
         private readonly ObservableCollection<SensorReading> _sensors =
             new ObservableCollection<SensorReading>();
         private readonly ObservableCollection<EditorComponent> _components =
@@ -40,6 +51,10 @@ namespace Turzx.Desktop
             new ObservableCollection<MonitorMetricDefinition>(MonitorMetrics.All);
         private readonly ObservableCollection<ThemePresetItem> _themePresets =
             new ObservableCollection<ThemePresetItem>();
+        private readonly ObservableCollection<MediaLibraryItem> _imageLibraryItems =
+            new ObservableCollection<MediaLibraryItem>();
+        private readonly ObservableCollection<MediaLibraryItem> _videoLibraryItems =
+            new ObservableCollection<MediaLibraryItem>();
         private readonly Dictionary<string, SensorReading> _sensorMap =
             new Dictionary<string, SensorReading>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Border> _componentVisuals =
@@ -47,12 +62,15 @@ namespace Turzx.Desktop
         private readonly List<ComboBox> _sensorMappingCombos = new List<ComboBox>();
         private readonly DispatcherTimer _refreshTimer;
         private readonly ListCollectionView _layerView;
+        private static readonly object UsbCommandSync = new object();
+        private readonly object _displaySettingsSync = new object();
 
         private SensorCatalogService _sensorService;
         private readonly WeatherService _weatherService;
         private WeatherSettings _weatherSettings;
         private readonly AiImageService _aiImageService;
         private AiImageSettings _aiImageSettings;
+        private DisplaySettings _displaySettings;
         private WeatherSnapshot _weatherSnapshot;
         private DateTime _nextWeatherRefresh = DateTime.MinValue;
         private bool _weatherRefreshBusy;
@@ -87,10 +105,28 @@ namespace Turzx.Desktop
         private bool _allowExit;
         private bool _trayHintShown;
         private bool _startupToggleLoading;
+        private bool _mediaLibraryLoading;
+        private bool _displaySettingsLoading;
+        private readonly bool _startMinimized;
+        private Task _startupOutputTask;
 
         public MainWindow()
         {
+            _startMinimized = Environment.GetCommandLineArgs().Any(delegate(string argument)
+            {
+                return string.Equals(argument, "--startup",
+                    StringComparison.OrdinalIgnoreCase);
+            });
+            if (_startMinimized)
+            {
+                ShowActivated = false;
+                ShowInTaskbar = false;
+                WindowState = WindowState.Minimized;
+            }
             InitializeComponent();
+            ImageLibraryCombo.ItemsSource = _imageLibraryItems;
+            VideoLibraryCombo.ItemsSource = _videoLibraryItems;
+            RefreshMediaLibraries();
             InitializeTrayIcon();
             LoadStartupSetting();
             _layerView = new ListCollectionView(_components);
@@ -104,9 +140,11 @@ namespace Turzx.Desktop
             _weatherService = new WeatherService();
             _aiImageSettings = AiImageSettingsStore.LoadOrDefault();
             _aiImageService = new AiImageService();
+            _displaySettings = DisplaySettingsStore.LoadOrDefault();
             InitializeSensorMappingControls();
             LoadWeatherSettingsIntoUi();
             LoadAiSettingsIntoUi();
+            LoadDisplaySettingsIntoUi();
             try
             {
                 _project = File.Exists(ThemeProjectStore.DefaultPath) ?
@@ -118,6 +156,7 @@ namespace Turzx.Desktop
             }
             LoadProjectIntoEditor(_project);
             RefreshThemePresets();
+            InitializeAutomations();
 
             _refreshTimer = new DispatcherTimer();
             _refreshTimer.Interval = TimeSpan.FromSeconds(1);
@@ -126,6 +165,11 @@ namespace Turzx.Desktop
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            if (_startMinimized)
+            {
+                ShowInTaskbar = false;
+                Hide();
+            }
             try
             {
                 ApplicationThemeManager.ApplySystemTheme();
@@ -138,6 +182,7 @@ namespace Turzx.Desktop
             SensorPermissionText.Text = "正在检查后台传感器服务…";
             await RefreshSensorServiceStateAsync();
             await CheckDeviceAsync();
+            await ApplyHardwareBrightnessAsync(false);
             try
             {
                 _sensorService = new SensorCatalogService();
@@ -149,6 +194,9 @@ namespace Turzx.Desktop
             {
                 SensorPermissionText.Text = "传感器不可用：" + exception.Message;
             }
+
+            if (_startMinimized) await RestoreStartupOutputAsync();
+            StartAutomationEngine();
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -157,6 +205,7 @@ namespace Turzx.Desktop
             {
                 e.Cancel = true;
                 if (_canvasPreviewWindow != null) _canvasPreviewWindow.Close();
+                ShowInTaskbar = false;
                 Hide();
                 if (!_trayHintShown && _trayIcon != null)
                 {
@@ -169,6 +218,7 @@ namespace Turzx.Desktop
             }
 
             _refreshTimer.Stop();
+            StopAutomationEngine();
             if (_videoCancellation != null) _videoCancellation.Cancel();
             if (_themeCancellation != null) _themeCancellation.Cancel();
             if (_creativeGenerationCancellation != null)
@@ -184,6 +234,7 @@ namespace Turzx.Desktop
                 SensorMappingStore.Save(_sensorMappings);
                 WeatherSettingsStore.Save(_weatherSettings);
                 AiImageSettingsStore.Save(_aiImageSettings);
+                DisplaySettingsStore.Save(_displaySettings);
             }
             catch
             {
@@ -230,6 +281,7 @@ namespace Turzx.Desktop
 
         private void ShowFromTray()
         {
+            ShowInTaskbar = true;
             Show();
             if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
             Activate();
@@ -272,8 +324,13 @@ namespace Turzx.Desktop
             try
             {
                 bool enabled = StartupManager.IsEnabled;
+                if (enabled)
+                {
+                    try { StartupManager.SetEnabled(true); }
+                    catch { }
+                }
                 StartupToggle.IsChecked = enabled;
-                StartupStatusText.Text = enabled ? "已随 Windows 自动启动" :
+                StartupStatusText.Text = enabled ? "开机后在托盘运行并恢复上次输出" :
                     "关闭后不会随 Windows 启动";
             }
             finally { _startupToggleLoading = false; }
@@ -286,7 +343,7 @@ namespace Turzx.Desktop
             try
             {
                 StartupManager.SetEnabled(enabled);
-                StartupStatusText.Text = enabled ? "已随 Windows 自动启动" :
+                StartupStatusText.Text = enabled ? "开机后在托盘运行并恢复上次输出" :
                     "关闭后不会随 Windows 启动";
             }
             catch (Exception exception)
@@ -296,6 +353,277 @@ namespace Turzx.Desktop
                 _startupToggleLoading = false;
                 StartupStatusText.Text = "设置失败：" + exception.Message;
             }
+        }
+
+        private void LoadDisplaySettingsIntoUi()
+        {
+            _displaySettingsLoading = true;
+            try
+            {
+                ScreenBrightnessSlider.Value = _displaySettings.Brightness;
+                ScreenTemperatureSlider.Value = _displaySettings.ColorTemperature;
+                ScreenHueSlider.Value = _displaySettings.Hue;
+                UpdateDisplaySettingsLabels();
+                DisplaySettingsStatusText.Text = "显示设置会在软件启动时自动恢复";
+            }
+            finally
+            {
+                _displaySettingsLoading = false;
+            }
+        }
+
+        private void ScreenBrightnessSlider_ValueChanged(object sender,
+            RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (ScreenBrightnessValueText != null)
+                ScreenBrightnessValueText.Text = Math.Round(e.NewValue) + "%";
+        }
+
+        private void ScreenColorTemperatureSlider_ValueChanged(object sender,
+            RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (ScreenTemperatureValueText != null)
+                ScreenTemperatureValueText.Text = Math.Round(e.NewValue) + " K";
+        }
+
+        private void ScreenHueSlider_ValueChanged(object sender,
+            RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (ScreenHueValueText != null)
+                ScreenHueValueText.Text = Math.Round(e.NewValue) + "°";
+        }
+
+        private void UpdateDisplaySettingsLabels()
+        {
+            ScreenBrightnessValueText.Text = Math.Round(ScreenBrightnessSlider.Value) + "%";
+            ScreenTemperatureValueText.Text = Math.Round(ScreenTemperatureSlider.Value) + " K";
+            ScreenHueValueText.Text = Math.Round(ScreenHueSlider.Value) + "°";
+        }
+
+        private async void ApplyDisplaySettings_Click(object sender, RoutedEventArgs e)
+        {
+            if (_displaySettingsLoading) return;
+            await CommitDisplaySettingsAsync();
+        }
+
+        private async void ResetDisplaySettings_Click(object sender, RoutedEventArgs e)
+        {
+            _displaySettingsLoading = true;
+            try
+            {
+                ScreenBrightnessSlider.Value = 100;
+                ScreenTemperatureSlider.Value = 6500;
+                ScreenHueSlider.Value = 0;
+                UpdateDisplaySettingsLabels();
+            }
+            finally
+            {
+                _displaySettingsLoading = false;
+            }
+            await CommitDisplaySettingsAsync();
+        }
+
+        private async Task CommitDisplaySettingsAsync()
+        {
+            ApplyDisplaySettingsButton.IsEnabled = false;
+            DisplaySettingsStatusText.Text = "正在应用到屏幕…";
+            try
+            {
+                lock (_displaySettingsSync)
+                {
+                    _displaySettings.Brightness = (int)Math.Round(
+                        ScreenBrightnessSlider.Value);
+                    _displaySettings.ColorTemperature = (int)Math.Round(
+                        ScreenTemperatureSlider.Value);
+                    _displaySettings.Hue = (int)Math.Round(ScreenHueSlider.Value);
+                    _displaySettings.Normalize();
+                    DisplaySettingsStore.Save(_displaySettings);
+                }
+
+                await ApplyHardwareBrightnessAsync(true);
+
+                OutputSessionSettings output = OutputSessionStore.LoadOrDefault();
+                if (output.Mode == OutputSessionMode.Image &&
+                    !string.IsNullOrWhiteSpace(_imagePath) && File.Exists(_imagePath))
+                    await SendImageAsync(false);
+
+                DisplaySettingsStatusText.Text = "已应用：亮度 " +
+                    _displaySettings.Brightness + "% · 色温 " +
+                    _displaySettings.ColorTemperature + " K · 色调 " +
+                    _displaySettings.Hue + "°";
+            }
+            catch (Exception exception)
+            {
+                DisplaySettingsStatusText.Text = "应用失败：" + exception.Message;
+            }
+            finally
+            {
+                ApplyDisplaySettingsButton.IsEnabled = true;
+            }
+        }
+
+        private async Task ApplyHardwareBrightnessAsync(bool throwOnFailure)
+        {
+            int brightness;
+            lock (_displaySettingsSync) brightness = _displaySettings.Brightness;
+            try
+            {
+                await Task.Run(delegate
+                {
+                    lock (UsbCommandSync)
+                    {
+                        using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
+                        {
+                            RequireSuccess(device.Exchange(
+                                TurzxProtocol.CreateBrightnessCommand(brightness), 14),
+                                "设置亮度");
+                        }
+                    }
+                });
+            }
+            catch
+            {
+                if (throwOnFailure) throw;
+            }
+        }
+
+        private async Task RestoreStartupOutputAsync()
+        {
+            OutputSessionSettings settings = OutputSessionStore.LoadOrDefault();
+            try
+            {
+                switch (settings.Mode)
+                {
+                    case OutputSessionMode.Image:
+                        if (string.IsNullOrWhiteSpace(settings.ImagePath) ||
+                            !File.Exists(settings.ImagePath))
+                            throw new FileNotFoundException("上次使用的图片不存在。",
+                                settings.ImagePath);
+                        _imagePath = settings.ImagePath;
+                        ImagePathText.Text = Path.GetFileName(_imagePath);
+                        ImagePreview.Source = LoadBitmapSource(_imagePath);
+                        ImageFitCombo.SelectedIndex = ClampIndex(settings.ImageFitIndex, 4);
+                        ImageRotationCombo.SelectedIndex = ClampIndex(
+                            settings.ImageRotationIndex, 4);
+                        ImagePreviewScale.ScaleX = ClampScale(settings.ImageScale);
+                        ImagePreviewScale.ScaleY = ImagePreviewScale.ScaleX;
+                        ImagePreviewTranslate.X = settings.ImageOffsetX;
+                        ImagePreviewTranslate.Y = settings.ImageOffsetY;
+                        if (await SendImageAsync(false))
+                            SetTrayStatus("图片显示");
+                        break;
+
+                    case OutputSessionMode.Video:
+                        if (string.IsNullOrWhiteSpace(settings.VideoPath) ||
+                            !File.Exists(settings.VideoPath))
+                            throw new FileNotFoundException("上次使用的视频不存在。",
+                                settings.VideoPath);
+                        string ffmpeg = VideoDecoderLocator.FindFfmpeg();
+                        if (string.IsNullOrEmpty(ffmpeg))
+                            throw new InvalidOperationException("未找到 FFmpeg，无法恢复视频播放。");
+                        _videoPath = settings.VideoPath;
+                        VideoPathText.Text = Path.GetFileName(_videoPath);
+                        VideoFitCombo.SelectedIndex = ClampIndex(settings.VideoFitIndex, 4);
+                        VideoRotationCombo.SelectedIndex = ClampIndex(
+                            settings.VideoRotationIndex, 4);
+                        VideoFpsCombo.SelectedIndex = ClampIndex(settings.VideoFpsIndex, 6);
+                        VideoLoopCheck.IsChecked = settings.VideoLoop;
+                        _videoMetadata = await Task.Run(delegate
+                        {
+                            return VideoProbe.Read(ffmpeg, _videoPath);
+                        });
+                        _videoScreenEncoded = _videoMetadata.LooksScreenEncoded;
+                        VideoPreview.Width = _videoMetadata.Width;
+                        VideoPreview.Height = _videoMetadata.Height;
+                        ApplyVideoPreviewRotation();
+                        VideoPreviewScale.ScaleX = ClampScale(settings.VideoScale);
+                        VideoPreviewScale.ScaleY = VideoPreviewScale.ScaleX;
+                        VideoPreviewTranslate.X = settings.VideoOffsetX;
+                        VideoPreviewTranslate.Y = settings.VideoOffsetY;
+                        VideoPreview.Source = new Uri(_videoPath);
+                        VideoPreview.Play();
+                        SetTrayStatus("视频播放");
+                        _startupOutputTask = PlayVideoAsync(false);
+                        break;
+
+                    case OutputSessionMode.Theme:
+                        SetTrayStatus("实时监控");
+                        _startupOutputTask = StartThemeAsync(false);
+                        break;
+
+                    default:
+                        SetTrayStatus("后台待机");
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                SetTrayStatus("自动恢复失败");
+                ShowTrayError("自动恢复失败", exception.Message);
+            }
+        }
+
+        private OutputSessionSettings CaptureImageOutput()
+        {
+            return new OutputSessionSettings
+            {
+                Mode = OutputSessionMode.Image,
+                ImagePath = _imagePath,
+                ImageFitIndex = ImageFitCombo.SelectedIndex,
+                ImageRotationIndex = ImageRotationCombo.SelectedIndex,
+                ImageScale = ImagePreviewScale.ScaleX,
+                ImageOffsetX = ImagePreviewTranslate.X,
+                ImageOffsetY = ImagePreviewTranslate.Y
+            };
+        }
+
+        private OutputSessionSettings CaptureVideoOutput()
+        {
+            return new OutputSessionSettings
+            {
+                Mode = OutputSessionMode.Video,
+                VideoPath = _videoPath,
+                VideoFitIndex = VideoFitCombo.SelectedIndex,
+                VideoRotationIndex = VideoRotationCombo.SelectedIndex,
+                VideoFpsIndex = VideoFpsCombo.SelectedIndex,
+                VideoLoop = VideoLoopCheck.IsChecked == true,
+                VideoScale = VideoPreviewScale.ScaleX,
+                VideoOffsetX = VideoPreviewTranslate.X,
+                VideoOffsetY = VideoPreviewTranslate.Y
+            };
+        }
+
+        private static int ClampIndex(int value, int count)
+        {
+            return Math.Max(0, Math.Min(count - 1, value));
+        }
+
+        private static double ClampScale(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value)) return 1;
+            return Math.Max(1, Math.Min(8, value));
+        }
+
+        private void RememberOutput(OutputSessionSettings settings)
+        {
+            try { OutputSessionStore.Save(settings); }
+            catch { }
+        }
+
+        private void SetTrayStatus(string status)
+        {
+            if (_trayIcon == null) return;
+            string text = "TURZX 屏幕控制 · " + status;
+            _trayIcon.Text = text.Length > 63 ? text.Substring(0, 63) : text;
+        }
+
+        private void ShowTrayError(string title, string message)
+        {
+            if (_trayIcon == null) return;
+            string text = string.IsNullOrWhiteSpace(message) ? "未知错误" : message;
+            if (text.Length > 180) text = text.Substring(0, 180) + "…";
+            _trayIcon.ShowBalloonTip(5000, title, text,
+                System.Windows.Forms.ToolTipIcon.Warning);
         }
 
         private void Navigate_Click(object sender, RoutedEventArgs e)
@@ -343,12 +671,14 @@ namespace Turzx.Desktop
             VideoPage.Visibility = page == "Video" ? Visibility.Visible : Visibility.Collapsed;
             CreativePage.Visibility = page == "Creative" ? Visibility.Visible : Visibility.Collapsed;
             EditorPage.Visibility = page == "Editor" ? Visibility.Visible : Visibility.Collapsed;
+            AutomationPage.Visibility = page == "Automation" ? Visibility.Visible : Visibility.Collapsed;
             SensorsPage.Visibility = page == "Sensors" ? Visibility.Visible : Visibility.Collapsed;
             SettingsPage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
 
             Wpf.Ui.Controls.Button[] buttons =
             {
-                NavDashboard, NavImage, NavVideo, NavCreative, NavEditor, NavSensors, NavSettings
+                NavDashboard, NavImage, NavVideo, NavCreative, NavEditor, NavAutomation,
+                NavSensors, NavSettings
             };
             foreach (Wpf.Ui.Controls.Button button in buttons)
             {
@@ -2030,6 +2360,11 @@ namespace Turzx.Desktop
 
         private async void StartTheme_Click(object sender, RoutedEventArgs e)
         {
+            await StartThemeAsync(true);
+        }
+
+        private async Task StartThemeAsync(bool rememberOutput)
+        {
             if (_themeCancellation != null) _themeCancellation.Cancel();
             if (_videoCancellation != null) _videoCancellation.Cancel();
 
@@ -2061,6 +2396,23 @@ namespace Turzx.Desktop
                     }, token);
                     await Task.Run(delegate { SendFrame(transport); }, token);
                     frame++;
+                    if (frame == 1)
+                    {
+                        SetTrayStatus("实时监控");
+                        if (rememberOutput)
+                        {
+                            try
+                            {
+                                ThemeProjectStore.Save(BuildProjectFromEditor(),
+                                    ThemeProjectStore.DefaultPath);
+                            }
+                            catch { }
+                            RememberOutput(new OutputSessionSettings
+                            {
+                                Mode = OutputSessionMode.Theme
+                            });
+                        }
+                    }
                     EditorStatusText.Text = "实时显示中 · 已刷新 " + frame + " 次";
                     SetDashboardPreview(logicalPng);
                     nextFrameAt += 250;
@@ -2076,6 +2428,8 @@ namespace Turzx.Desktop
             catch (Exception exception)
             {
                 EditorStatusText.Text = "实时显示失败：" + exception.Message;
+                if (_startMinimized)
+                    ShowTrayError("实时监控恢复失败", exception.Message);
             }
             finally
             {
@@ -2232,18 +2586,111 @@ namespace Turzx.Desktop
             CreativeStatusText.Text = "已清空";
         }
 
+        private void RefreshMediaLibraries()
+        {
+            string imageSelection = ImageLibraryCombo.SelectedValue as string ?? _imagePath;
+            string videoSelection = VideoLibraryCombo.SelectedValue as string ?? _videoPath;
+            string automationSelection = AutomationMediaCombo.SelectedValue as string;
+            _mediaLibraryLoading = true;
+            try
+            {
+                RefreshMediaCollection(_imageLibraryItems,
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Images"),
+                    new[] { ".png", ".jpg", ".jpeg", ".bmp" });
+                RefreshMediaCollection(_videoLibraryItems,
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "videos"),
+                    new[] { ".mp4", ".mov", ".avi", ".mkv", ".wmv" });
+                SelectMediaPath(ImageLibraryCombo, imageSelection);
+                SelectMediaPath(VideoLibraryCombo, videoSelection);
+                if (_selectedAutomationAction != null)
+                {
+                    if (_selectedAutomationAction.Kind == AutomationActionKind.ShowImage)
+                        AutomationMediaCombo.ItemsSource = _imageLibraryItems;
+                    else if (_selectedAutomationAction.Kind == AutomationActionKind.PlayVideo)
+                        AutomationMediaCombo.ItemsSource = _videoLibraryItems;
+                    SelectMediaPath(AutomationMediaCombo,
+                        string.IsNullOrWhiteSpace(automationSelection) ?
+                        _selectedAutomationAction.FilePath : automationSelection);
+                }
+            }
+            finally
+            {
+                _mediaLibraryLoading = false;
+            }
+        }
+
+        private static void RefreshMediaCollection(
+            ObservableCollection<MediaLibraryItem> target, string directory,
+            IEnumerable<string> extensions)
+        {
+            HashSet<string> allowed = new HashSet<string>(extensions,
+                StringComparer.OrdinalIgnoreCase);
+            target.Clear();
+            if (!Directory.Exists(directory)) return;
+            foreach (string file in Directory.GetFiles(directory)
+                .Where(delegate(string path)
+                {
+                    return allowed.Contains(Path.GetExtension(path));
+                })
+                .OrderBy(delegate(string path)
+                {
+                    return Path.GetFileName(path);
+                }, StringComparer.CurrentCultureIgnoreCase))
+                target.Add(new MediaLibraryItem
+                {
+                    Name = Path.GetFileName(file),
+                    FullPath = Path.GetFullPath(file)
+                });
+        }
+
+        private static void SelectMediaPath(ComboBox combo, string path)
+        {
+            if (combo == null) return;
+            combo.SelectedValue = string.IsNullOrWhiteSpace(path) ? null :
+                Path.GetFullPath(path);
+        }
+
+        private void ImageLibraryCombo_DropDownOpened(object sender, EventArgs e)
+        {
+            RefreshMediaLibraries();
+        }
+
+        private void ImageLibraryCombo_SelectionChanged(object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (_mediaLibraryLoading) return;
+            string path = ImageLibraryCombo.SelectedValue as string;
+            if (!string.IsNullOrWhiteSpace(path)) LoadImageFile(path);
+        }
+
+        private void LoadImageFile(string path)
+        {
+            try
+            {
+                _imagePath = path;
+                ImagePathText.Text = Path.GetFileName(_imagePath);
+                ImagePreview.Source = LoadBitmapSource(_imagePath);
+                ResetImageTransform();
+                ImageStatusText.Text = "图片已载入";
+                if (!_mediaLibraryLoading)
+                {
+                    _mediaLibraryLoading = true;
+                    SelectMediaPath(ImageLibraryCombo, _imagePath);
+                    _mediaLibraryLoading = false;
+                }
+            }
+            catch (Exception exception)
+            {
+                ImageStatusText.Text = "图片读取失败：" + exception.Message;
+            }
+        }
+
         private void ChooseImage_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp";
             if (dialog.ShowDialog(this) == true)
-            {
-                _imagePath = dialog.FileName;
-                ImagePathText.Text = Path.GetFileName(_imagePath);
-                ImagePreview.Source = LoadBitmapSource(_imagePath);
-                ResetImageTransform();
-                ImageStatusText.Text = "图片已载入";
-            }
+                LoadImageFile(dialog.FileName);
         }
 
         private void ImageFitCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2313,10 +2760,15 @@ namespace Turzx.Desktop
 
         private async void SendImage_Click(object sender, RoutedEventArgs e)
         {
+            await SendImageAsync(true);
+        }
+
+        private async Task<bool> SendImageAsync(bool rememberOutput)
+        {
             if (string.IsNullOrEmpty(_imagePath))
             {
                 ImageStatusText.Text = "请先选择图片";
-                return;
+                return false;
             }
             try
             {
@@ -2354,11 +2806,67 @@ namespace Turzx.Desktop
                         }
                     });
                 }
+                if (rememberOutput) RememberOutput(CaptureImageOutput());
+                SetTrayStatus("图片显示");
                 ImageStatusText.Text = "图片已显示在屏幕上";
+                return true;
             }
             catch (Exception exception)
             {
                 ImageStatusText.Text = "发送失败：" + exception.Message;
+                if (_startMinimized)
+                    ShowTrayError("图片恢复失败", exception.Message);
+                return false;
+            }
+        }
+
+        private void VideoLibraryCombo_DropDownOpened(object sender, EventArgs e)
+        {
+            RefreshMediaLibraries();
+        }
+
+        private async void VideoLibraryCombo_SelectionChanged(object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (_mediaLibraryLoading) return;
+            string path = VideoLibraryCombo.SelectedValue as string;
+            if (!string.IsNullOrWhiteSpace(path)) await LoadVideoFileAsync(path);
+        }
+
+        private async Task LoadVideoFileAsync(string path)
+        {
+            _videoPath = path;
+            VideoPathText.Text = Path.GetFileName(_videoPath);
+            VideoStatusText.Text = "正在读取视频信息…";
+            try
+            {
+                string ffmpeg = VideoDecoderLocator.FindFfmpeg();
+                if (string.IsNullOrEmpty(ffmpeg))
+                    throw new InvalidOperationException("未找到 FFmpeg。");
+                string selectedPath = _videoPath;
+                _videoMetadata = await Task.Run(delegate
+                {
+                    return VideoProbe.Read(ffmpeg, selectedPath);
+                });
+                _videoScreenEncoded = _videoMetadata.LooksScreenEncoded;
+                VideoPreview.Width = _videoMetadata.Width;
+                VideoPreview.Height = _videoMetadata.Height;
+                ApplyVideoPreviewRotation();
+                ResetVideoTransform();
+                VideoPreview.Source = new Uri(_videoPath);
+                VideoPreview.Play();
+                VideoStatusText.Text = "视频已载入 · " + _videoMetadata.Width + " × " +
+                    _videoMetadata.Height;
+                if (!_mediaLibraryLoading)
+                {
+                    _mediaLibraryLoading = true;
+                    SelectMediaPath(VideoLibraryCombo, _videoPath);
+                    _mediaLibraryLoading = false;
+                }
+            }
+            catch (Exception exception)
+            {
+                VideoStatusText.Text = "视频读取失败：" + exception.Message;
             }
         }
 
@@ -2367,31 +2875,7 @@ namespace Turzx.Desktop
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.Filter = "视频|*.mp4;*.mov;*.avi;*.mkv;*.wmv";
             if (dialog.ShowDialog(this) == true)
-            {
-                _videoPath = dialog.FileName;
-                VideoPathText.Text = Path.GetFileName(_videoPath);
-                VideoStatusText.Text = "正在读取视频信息…";
-                try
-                {
-                    string ffmpeg = VideoDecoderLocator.FindFfmpeg();
-                    if (string.IsNullOrEmpty(ffmpeg)) throw new InvalidOperationException("未找到 FFmpeg。");
-                    string path = _videoPath;
-                    _videoMetadata = await Task.Run(delegate { return VideoProbe.Read(ffmpeg, path); });
-                    _videoScreenEncoded = _videoMetadata.LooksScreenEncoded;
-                    VideoPreview.Width = _videoMetadata.Width;
-                    VideoPreview.Height = _videoMetadata.Height;
-                    ApplyVideoPreviewRotation();
-                    ResetVideoTransform();
-                    VideoPreview.Source = new Uri(_videoPath);
-                    VideoPreview.Play();
-                    VideoStatusText.Text = "视频已载入 · " + _videoMetadata.Width + " × " +
-                        _videoMetadata.Height;
-                }
-                catch (Exception exception)
-                {
-                    VideoStatusText.Text = "视频读取失败：" + exception.Message;
-                }
-            }
+                await LoadVideoFileAsync(dialog.FileName);
         }
 
         private void VideoFitCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2475,6 +2959,11 @@ namespace Turzx.Desktop
 
         private async void PlayVideo_Click(object sender, RoutedEventArgs e)
         {
+            await PlayVideoAsync(true);
+        }
+
+        private async Task PlayVideoAsync(bool rememberOutput)
+        {
             if (string.IsNullOrEmpty(_videoPath))
             {
                 VideoStatusText.Text = "请先选择视频";
@@ -2492,6 +2981,8 @@ namespace Turzx.Desktop
             float customZoom = (float)VideoPreviewScale.ScaleX;
             float customOffsetX = (float)VideoPreviewTranslate.X;
             float customOffsetY = (float)VideoPreviewTranslate.Y;
+            OutputSessionSettings rememberedSession = rememberOutput ?
+                CaptureVideoOutput() : null;
             VideoStatusText.Text = "正在播放到屏幕…";
             try
             {
@@ -2517,7 +3008,15 @@ namespace Turzx.Desktop
                         CustomOffsetY = customOffsetY,
                         CustomAspectRatio = CalculateVideoAspect(metadata, rotation)
                     };
-                    PlayVideoFrames(ffmpeg, metadata, request, token);
+                    PlayVideoFrames(ffmpeg, metadata, request, token,
+                        rememberedSession == null ? (Action)null : delegate
+                        {
+                            RememberOutput(rememberedSession);
+                            Dispatcher.BeginInvoke(new Action(delegate
+                            {
+                                SetTrayStatus("视频播放");
+                            }));
+                        });
                 }, token);
                 VideoStatusText.Text = "视频播放完成";
             }
@@ -2528,16 +3027,19 @@ namespace Turzx.Desktop
             catch (Exception exception)
             {
                 VideoStatusText.Text = "播放失败：" + exception.Message;
+                if (_startMinimized)
+                    ShowTrayError("视频恢复失败", exception.Message);
             }
         }
 
         private void PlayVideoFrames(string ffmpeg, VideoMetadata metadata,
-            VideoPlaybackRequest request, CancellationToken token)
+            VideoPlaybackRequest request, CancellationToken token, Action started)
         {
             using (VideoFrameDecoder decoder = new VideoFrameDecoder(ffmpeg, request, metadata))
             using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
             {
-                RequireSuccess(device.Exchange(TurzxProtocol.CreateCommand(10), 10), "同步");
+                lock (UsbCommandSync)
+                    RequireSuccess(device.Exchange(TurzxProtocol.CreateCommand(10), 10), "同步");
                 int interval = 1000 / Math.Max(1, request.FramesPerSecond);
                 int frame = 0;
                 while (true)
@@ -2546,8 +3048,15 @@ namespace Turzx.Desktop
                     Stopwatch timer = Stopwatch.StartNew();
                     byte[] png = decoder.ReadNextTransportPng(token);
                     if (png == null) break;
-                    RequireSuccess(device.Exchange(TurzxProtocol.CreateImageUpload(png), 102), "视频帧");
+                    png = ApplyDisplayColorSettings(png);
+                    lock (UsbCommandSync)
+                        RequireSuccess(device.Exchange(TurzxProtocol.CreateImageUpload(png), 102), "视频帧");
                     frame++;
+                    if (frame == 1 && started != null)
+                    {
+                        started();
+                        started = null;
+                    }
                     if (frame % 5 == 0)
                     {
                         int shown = frame;
@@ -2607,12 +3116,28 @@ namespace Turzx.Desktop
             return height <= 0 ? 3.0f : (float)(width / height);
         }
 
-        private static void SendFrame(byte[] png)
+        private byte[] ApplyDisplayColorSettings(byte[] png)
         {
-            using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
+            int temperature;
+            int hue;
+            lock (_displaySettingsSync)
             {
-                RequireSuccess(device.Exchange(TurzxProtocol.CreateCommand(10), 10), "同步");
-                RequireSuccess(device.Exchange(TurzxProtocol.CreateImageUpload(png), 102), "发送画面");
+                temperature = _displaySettings.ColorTemperature;
+                hue = _displaySettings.Hue;
+            }
+            return DisplayColorProcessor.Apply(png, temperature, hue);
+        }
+
+        private void SendFrame(byte[] png)
+        {
+            byte[] adjusted = ApplyDisplayColorSettings(png);
+            lock (UsbCommandSync)
+            {
+                using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
+                {
+                    RequireSuccess(device.Exchange(TurzxProtocol.CreateCommand(10), 10), "同步");
+                    RequireSuccess(device.Exchange(TurzxProtocol.CreateImageUpload(adjusted), 102), "发送画面");
+                }
             }
         }
 

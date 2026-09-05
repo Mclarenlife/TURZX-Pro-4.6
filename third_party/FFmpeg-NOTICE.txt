@@ -1,0 +1,16 @@
+FFmpeg redistribution notice
+============================
+
+The release bundles ffmpeg.exe for local video decoding.
+
+Build: 2022-08-31-git-319e8a49b5 essentials_build from gyan.dev
+Project: https://ffmpeg.org/
+Source revision: https://github.com/FFmpeg/FFmpeg/commit/319e8a49b5
+Build provider: https://www.gyan.dev/ffmpeg/builds/
+
+This build reports that it was configured with --enable-gpl and
+--enable-version3. The GNU General Public License version 3 is included in
+licenses/FFmpeg/COPYING.GPLv3 inside the distributed application.
+
+TURZX Pro invokes FFmpeg as a separate process and does not incorporate
+FFmpeg source code into the application executable.

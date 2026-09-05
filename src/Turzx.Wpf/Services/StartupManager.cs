@@ -19,7 +19,9 @@ namespace Turzx.Desktop.Services
                     {
                         string value = key == null ? null : Convert.ToString(key.GetValue(ValueName));
                         return string.Equals(value, BuildCommand(),
-                            StringComparison.OrdinalIgnoreCase);
+                                   StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(value, BuildLegacyCommand(),
+                                   StringComparison.OrdinalIgnoreCase);
                     }
                 }
                 catch { return false; }
@@ -39,6 +41,12 @@ namespace Turzx.Desktop.Services
         }
 
         private static string BuildCommand()
+        {
+            string path = Process.GetCurrentProcess().MainModule.FileName;
+            return "\"" + path + "\" --startup";
+        }
+
+        private static string BuildLegacyCommand()
         {
             string path = Process.GetCurrentProcess().MainModule.FileName;
             return "\"" + path + "\"";
