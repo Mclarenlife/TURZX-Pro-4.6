@@ -39,9 +39,6 @@
   <tr><td colspan="2" align="center">AI 生成 3:1 屏幕背景框架</td></tr>
 </table>
 
-## 实机效果
-
-![TURZX 4.6 英寸屏幕实拍](docs/images/device-photo.jpg)
 
 ## 下载与安装
 
