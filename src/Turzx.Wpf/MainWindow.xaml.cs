@@ -31,6 +31,9 @@ namespace Turzx.Desktop
     {
         private const ushort VendorId = 0x1CBE;
         private const ushort ProductId = 0x0046;
+        private const int UsbCommandRetryCount = 3;
+        private static readonly TimeSpan StartupDeviceReadyTimeout =
+            TimeSpan.FromSeconds(30);
 
         private sealed class MediaLibraryItem
         {
@@ -90,6 +93,7 @@ namespace Turzx.Desktop
         private bool _videoScreenEncoded;
         private CancellationTokenSource _videoCancellation;
         private CancellationTokenSource _themeCancellation;
+        private WinUsbDevice _themeUsbDevice;
         private CancellationTokenSource _creativeGenerationCancellation;
         private byte[] _creativeImageBytes;
         private bool _imageDragging;
@@ -182,7 +186,7 @@ namespace Turzx.Desktop
             SensorPermissionText.Text = "正在检查后台传感器服务…";
             await RefreshSensorServiceStateAsync();
             await CheckDeviceAsync();
-            await ApplyHardwareBrightnessAsync(false);
+            if (!_startMinimized) await ApplyHardwareBrightnessAsync(false);
             try
             {
                 _sensorService = new SensorCatalogService();
@@ -492,6 +496,14 @@ namespace Turzx.Desktop
             OutputSessionSettings settings = OutputSessionStore.LoadOrDefault();
             try
             {
+                if (settings.Mode != OutputSessionMode.None)
+                {
+                    SetTrayStatus("正在等待屏幕就绪");
+                    EditorStatusText.Text = "正在等待 USB 屏幕完成启动…";
+                    await WaitForDeviceReadyAsync(StartupDeviceReadyTimeout);
+                    await ApplyHardwareBrightnessAsync(false);
+                }
+
                 switch (settings.Mode)
                 {
                     case OutputSessionMode.Image:
@@ -561,6 +573,47 @@ namespace Turzx.Desktop
                 SetTrayStatus("自动恢复失败");
                 ShowTrayError("自动恢复失败", exception.Message);
             }
+        }
+
+        private async Task WaitForDeviceReadyAsync(TimeSpan timeout)
+        {
+            Stopwatch elapsed = Stopwatch.StartNew();
+            Exception lastError = null;
+            int attempt = 0;
+            while (elapsed.Elapsed < timeout)
+            {
+                attempt++;
+                try
+                {
+                    await Task.Run(delegate
+                    {
+                        lock (UsbCommandSync)
+                        {
+                            using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
+                            {
+                                RequireSuccess(device.Exchange(
+                                    TurzxProtocol.CreateCommand(10), 10), "等待屏幕启动");
+                            }
+                        }
+                    });
+                    NavDeviceStatus.Text = "● 已连接";
+                    NavDeviceStatus.ToolTip = "USB 屏幕已完成启动并能响应命令。";
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    lastError = exception;
+                }
+
+                int delay = Math.Min(2000, 350 + attempt * 250);
+                TimeSpan remaining = timeout - elapsed.Elapsed;
+                if (remaining <= TimeSpan.Zero) break;
+                await Task.Delay(Math.Min(delay, Math.Max(1, (int)remaining.TotalMilliseconds)));
+            }
+
+            string detail = lastError == null ? string.Empty : " 最后一次错误：" + lastError.Message;
+            throw new TimeoutException("USB 屏幕在 30 秒内未完成启动，请重新插拔屏幕后重试。" + detail,
+                lastError);
         }
 
         private OutputSessionSettings CaptureImageOutput()
@@ -2394,7 +2447,7 @@ namespace Turzx.Desktop
                                 ImageFitMode.Stretch, System.Drawing.Color.Black);
                         }
                     }, token);
-                    await Task.Run(delegate { SendFrame(transport); }, token);
+                    await Task.Run(delegate { SendThemeFrame(transport); }, token);
                     frame++;
                     if (frame == 1)
                     {
@@ -2433,6 +2486,7 @@ namespace Turzx.Desktop
             }
             finally
             {
+                DisposeThemeUsbDevice();
                 if (ReferenceEquals(_themeCancellation, cancellation))
                 {
                     _themeCancellation.Dispose();
@@ -3050,7 +3104,7 @@ namespace Turzx.Desktop
                     if (png == null) break;
                     png = ApplyDisplayColorSettings(png);
                     lock (UsbCommandSync)
-                        RequireSuccess(device.Exchange(TurzxProtocol.CreateImageUpload(png), 102), "视频帧");
+                        device.Send(TurzxProtocol.CreateImageUpload(png));
                     frame++;
                     if (frame == 1 && started != null)
                     {
@@ -3131,14 +3185,79 @@ namespace Turzx.Desktop
         private void SendFrame(byte[] png)
         {
             byte[] adjusted = ApplyDisplayColorSettings(png);
-            lock (UsbCommandSync)
+            Exception lastError = null;
+            for (int attempt = 1; attempt <= UsbCommandRetryCount; attempt++)
             {
-                using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
+                try
                 {
-                    RequireSuccess(device.Exchange(TurzxProtocol.CreateCommand(10), 10), "同步");
-                    RequireSuccess(device.Exchange(TurzxProtocol.CreateImageUpload(adjusted), 102), "发送画面");
+                    lock (UsbCommandSync)
+                    {
+                        using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
+                        {
+                            RequireSuccess(device.Exchange(
+                                TurzxProtocol.CreateCommand(10), 10), "同步");
+                            device.Send(TurzxProtocol.CreateImageUpload(adjusted));
+                        }
+                    }
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    lastError = exception;
+                    if (attempt >= UsbCommandRetryCount) break;
+                    Thread.Sleep(250 * attempt);
                 }
             }
+
+            throw new InvalidOperationException(
+                "USB 屏幕连续 " + UsbCommandRetryCount + " 次未响应。", lastError);
+        }
+
+        private void SendThemeFrame(byte[] png)
+        {
+            byte[] adjusted = ApplyDisplayColorSettings(png);
+            Exception lastError = null;
+            lock (UsbCommandSync)
+            {
+                for (int attempt = 1; attempt <= UsbCommandRetryCount; attempt++)
+                {
+                    try
+                    {
+                        if (_themeUsbDevice == null)
+                        {
+                            _themeUsbDevice = WinUsbDevice.Open(VendorId, ProductId);
+                            RequireSuccess(_themeUsbDevice.Exchange(
+                                TurzxProtocol.CreateCommand(10), 10), "同步");
+                        }
+
+                        _themeUsbDevice.Send(TurzxProtocol.CreateImageUpload(adjusted));
+                        return;
+                    }
+                    catch (Exception exception)
+                    {
+                        lastError = exception;
+                        DisposeThemeUsbDeviceCore();
+                        if (attempt < UsbCommandRetryCount)
+                            Thread.Sleep(250 * attempt);
+                    }
+                }
+            }
+
+            throw new InvalidOperationException(
+                "USB 屏幕连续 " + UsbCommandRetryCount + " 次未响应。", lastError);
+        }
+
+        private void DisposeThemeUsbDevice()
+        {
+            lock (UsbCommandSync)
+                DisposeThemeUsbDeviceCore();
+        }
+
+        private void DisposeThemeUsbDeviceCore()
+        {
+            if (_themeUsbDevice == null) return;
+            _themeUsbDevice.Dispose();
+            _themeUsbDevice = null;
         }
 
         private static void RequireSuccess(byte[] response, string operation)

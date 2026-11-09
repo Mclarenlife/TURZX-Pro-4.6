@@ -1,6 +1,6 @@
 # TURZX Pro 4.6
 
-![版本](https://img.shields.io/badge/version-v1.1-2f81f7) ![平台](https://img.shields.io/badge/platform-Windows%20x64-111827) ![屏幕](https://img.shields.io/badge/display-960%C3%97320-0ea5e9)
+![版本](https://img.shields.io/badge/version-v1.1.1-2f81f7) ![平台](https://img.shields.io/badge/platform-Windows%20x64-111827) ![屏幕](https://img.shields.io/badge/display-960%C3%97320-0ea5e9)
 
 一款面向 **TURZX 4.6 英寸 USB 副屏**的现代化 Windows 控制软件。支持图片、视频、实时硬件监控、可视化主题编辑、AI 背景创作和自动化规则，并提供深浅色界面、开机启动与系统托盘。
 
@@ -42,7 +42,7 @@
 
 ## 下载与安装
 
-1. 打开仓库右侧的 **Releases**，下载 `TURZX-Pro-v1.1-Setup.exe`。
+1. 打开仓库右侧的 **Releases**，下载 `TURZX-Pro-v1.1.1-Setup.exe`。
 2. 退出 TURZX 原厂控制软件，避免两个程序同时占用 USB 设备。
 3. 运行安装程序，然后启动 **TURZX Pro 4.6**。
 4. 将屏幕通过 USB 连接到电脑，软件会自动检查设备。
@@ -50,9 +50,9 @@
 
 也可以下载 Release 中的便携版 ZIP，解压后运行 `Turzx.ControlPanel.Wpf.exe`。
 
-Release 还提供 `TURZX-Pro-v1.1-Theme-black1.zip` 黑白硬件监控主题。将其中的 `Theme` 文件夹解压到软件目录并合并，重启软件后即可在“监控主题编辑器 → 主题预设”中选择 `black1`。
+Release 还提供 `TURZX-Pro-v1.1.1-Theme-black1.zip` 黑白硬件监控主题。将其中的 `Theme` 文件夹解压到软件目录并合并，重启软件后即可在“监控主题编辑器 → 主题预设”中选择 `black1`。
 
-> v1.1 暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。请只从本仓库 Release 下载，并使用随 Release 提供的 `SHA256SUMS.txt` 校验文件完整性。
+> v1.1.1 暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。请只从本仓库 Release 下载，并使用随 Release 提供的 `SHA256SUMS.txt` 校验文件完整性。
 
 ### 运行环境
 
@@ -103,4 +103,4 @@ Release 还提供 `TURZX-Pro-v1.1-Theme-black1.zip` 黑白硬件监控主题。�
 
 ## 版本
 
-当前正式版本：**v1.1**。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
+当前正式版本：**v1.1.1**。更新内容见 [CHANGELOG.md](CHANGELOG.md)。

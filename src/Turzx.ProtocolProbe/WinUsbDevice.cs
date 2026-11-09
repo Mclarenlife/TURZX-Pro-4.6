@@ -94,6 +94,18 @@ namespace Turzx.ProtocolProbe
                     {
                         break;
                     }
+                    // The controller commonly terminates an upload transfer with a
+                    // zero-length packet. WinUSB can surface that boundary as
+                    // ERROR_GEN_FAILURE even though the command response follows on
+                    // the same IN pipe. Keep reading instead of discarding a valid
+                    // response that is about to arrive.
+                    if (error == NativeMethods.ErrorGenFailure)
+                    {
+                        RecoverPipes();
+                        Thread.Sleep(10);
+                        continue;
+                    }
+                    RecoverPipes();
                     throw new Win32Exception(error, "WinUSB read failed (" + error + ")");
                 }
 
@@ -117,7 +129,85 @@ namespace Turzx.ProtocolProbe
                     response[0], expectedResponseCommand);
             }
 
+            RecoverPipes();
             throw new TimeoutException("The TURZX device did not return a command response within 2.5 seconds.");
+        }
+
+        public void Send(byte[] payload)
+        {
+            if (payload == null)
+            {
+                throw new ArgumentNullException("payload");
+            }
+
+            // Image frames are streamed by the factory application without requiring
+            // an acknowledgement. The controller may queue a 0x66 response, emit a
+            // zero-length packet, or report ERROR_GEN_FAILURE even after accepting the
+            // full frame. Clear the previous optional response, then treat a complete
+            // OUT transfer as success. The next command will flush any late response.
+            Exception lastError = null;
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                NativeMethods.WinUsb_FlushPipe(_winUsbHandle, InEndpoint);
+
+                uint transferred;
+                if (NativeMethods.WinUsb_WritePipe(_winUsbHandle, OutEndpoint, payload,
+                    (uint)payload.Length, out transferred, IntPtr.Zero))
+                {
+                    if (transferred != payload.Length)
+                    {
+                        throw new InvalidOperationException(string.Format(
+                            "WinUSB write was incomplete: {0} of {1} bytes.",
+                            transferred, payload.Length));
+                    }
+
+                    DrainOptionalResponse();
+                    return;
+                }
+
+                int error = Marshal.GetLastWin32Error();
+                lastError = new Win32Exception(error, "WinUSB write failed (" + error + ")");
+                RecoverPipes();
+                if (attempt < 3) Thread.Sleep(25 * attempt);
+            }
+
+            throw lastError;
+        }
+
+        private void DrainOptionalResponse()
+        {
+            // LibUsbDotNet (used by the factory software) reads once and then flushes
+            // after every frame. Give the controller a brief processing window first;
+            // reading immediately through WinUSB often observes only its transfer
+            // boundary and leaves the real 0x66 response queued behind it.
+            Thread.Sleep(20);
+            uint shortTimeout = 100;
+            NativeMethods.WinUsb_SetPipePolicy(_winUsbHandle, InEndpoint,
+                NativeMethods.PipeTransferTimeout, sizeof(uint), ref shortTimeout);
+            try
+            {
+                byte[] buffer = new byte[512];
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    uint transferred;
+                    if (NativeMethods.WinUsb_ReadPipe(_winUsbHandle, InEndpoint, buffer,
+                        (uint)buffer.Length, out transferred, IntPtr.Zero) && transferred > 0)
+                    {
+                        break;
+                    }
+
+                    int error = Marshal.GetLastWin32Error();
+                    if (error != NativeMethods.ErrorGenFailure) break;
+                    Thread.Sleep(10);
+                }
+                NativeMethods.WinUsb_FlushPipe(_winUsbHandle, InEndpoint);
+            }
+            finally
+            {
+                uint normalTimeout = 2500;
+                NativeMethods.WinUsb_SetPipePolicy(_winUsbHandle, InEndpoint,
+                    NativeMethods.PipeTransferTimeout, sizeof(uint), ref normalTimeout);
+            }
         }
 
         public void Dispose()
@@ -193,7 +283,21 @@ namespace Turzx.ProtocolProbe
             }
 
             SetTransferTimeout(OutEndpoint, 2000);
-            SetTransferTimeout(InEndpoint, 2000);
+            SetTransferTimeout(InEndpoint, 2500);
+            RecoverPipes();
+        }
+
+        private void RecoverPipes()
+        {
+            // After a cold boot or resume, this controller can remain enumerated while
+            // one of its bulk endpoints is still halted or has a stale data toggle.
+            // Reset both directions before the first command so a visible USB device
+            // also has a usable command channel.
+            NativeMethods.WinUsb_AbortPipe(_winUsbHandle, OutEndpoint);
+            NativeMethods.WinUsb_AbortPipe(_winUsbHandle, InEndpoint);
+            NativeMethods.WinUsb_ResetPipe(_winUsbHandle, OutEndpoint);
+            NativeMethods.WinUsb_ResetPipe(_winUsbHandle, InEndpoint);
+            NativeMethods.WinUsb_FlushPipe(_winUsbHandle, InEndpoint);
         }
 
         private void SetTransferTimeout(byte pipeId, uint timeoutMilliseconds)
@@ -320,6 +424,7 @@ namespace Turzx.ProtocolProbe
             internal const uint DigcfPresent = 0x00000002;
             internal const uint DigcfDeviceInterface = 0x00000010;
             internal const int ErrorNoMoreItems = 259;
+            internal const int ErrorGenFailure = 31;
             internal const int ErrorSemTimeout = 121;
             internal const uint GenericRead = 0x80000000;
             internal const uint GenericWrite = 0x40000000;
@@ -394,6 +499,14 @@ namespace Turzx.ProtocolProbe
             [DllImport("winusb.dll", SetLastError = true)]
             [return: MarshalAs(UnmanagedType.Bool)]
             internal static extern bool WinUsb_FlushPipe(IntPtr interfaceHandle, byte pipeId);
+
+            [DllImport("winusb.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool WinUsb_AbortPipe(IntPtr interfaceHandle, byte pipeId);
+
+            [DllImport("winusb.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool WinUsb_ResetPipe(IntPtr interfaceHandle, byte pipeId);
         }
     }
 }

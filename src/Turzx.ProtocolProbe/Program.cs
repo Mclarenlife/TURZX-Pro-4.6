@@ -179,14 +179,9 @@ namespace Turzx.ProtocolProbe
             {
                 byte[] png = TestPattern.CreateLandscapePng(frame, frameCount);
                 TurzxProtocol.DescribePanelPng(png);
-                byte[] response = device.Exchange(TurzxProtocol.CreateImageUpload(png), 102);
-                bool success = response.Length > 1 && response[1] == 0xC8;
-                Console.WriteLine("Frame {0,2}/{1}: {2:N0} bytes, response {3}",
-                    frame + 1, frameCount, png.Length, success ? "OK" : "UNEXPECTED");
-                if (!success)
-                {
-                    return 4;
-                }
+                device.Send(TurzxProtocol.CreateImageUpload(png));
+                Console.WriteLine("Frame {0,2}/{1}: {2:N0} bytes, write OK",
+                    frame + 1, frameCount, png.Length);
                 Thread.Sleep(750);
             }
 
@@ -212,19 +207,14 @@ namespace Turzx.ProtocolProbe
                     byte[] png = DashboardRenderer.CreateTransportPng(
                         sample, System.Drawing.Color.FromArgb(46, 230, 166));
                     TurzxProtocol.DescribePanelPng(png);
-                    byte[] response = device.Exchange(TurzxProtocol.CreateImageUpload(png), 102);
-                    bool success = response.Length > 1 && response[1] == 0xC8;
+                    device.Send(TurzxProtocol.CreateImageUpload(png));
                     Console.WriteLine(
                         "Frame {0,2}/{1}: CPU {2,5:0.0}% {3,5}  GPU {4,5:0}% {5,5}  {6}",
                         frame + 1, frameCount, sample.CpuPercent,
                         FormatNullable(sample.CpuTemperatureC, "0", "C"),
                         sample.GpuLoadPercent ?? 0,
                         FormatNullable(sample.GpuTemperatureC, "0", "C"),
-                        success ? "OK" : "UNEXPECTED");
-                    if (!success)
-                    {
-                        return 4;
-                    }
+                        "write OK");
                     Thread.Sleep(1000);
                 }
             }
@@ -301,16 +291,10 @@ namespace Turzx.ProtocolProbe
                         File.WriteAllBytes(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                             "video-preview.png"), png);
                     }
-                    byte[] response = device.Exchange(
-                        TurzxProtocol.CreateImageUpload(png), 102);
-                    bool success = response.Length > 1 && response[1] == 0xC8;
+                    device.Send(TurzxProtocol.CreateImageUpload(png));
                     Console.WriteLine("Frame {0,3}/{1}: {2,8:N0} bytes, {3,4} ms, {4}",
                         frameNumber, frameLimit, png.Length, frameTimer.ElapsedMilliseconds,
-                        success ? "OK" : "UNEXPECTED");
-                    if (!success)
-                    {
-                        return 4;
-                    }
+                        "write OK");
                     int remaining = (1000 / outputFps) - (int)frameTimer.ElapsedMilliseconds;
                     if (remaining > 0)
                     {
@@ -360,8 +344,8 @@ namespace Turzx.ProtocolProbe
             byte[] syncResponse = device.Exchange(TurzxProtocol.CreateCommand(10), 10);
             PrintResponse("SYNC", syncResponse);
 
-            byte[] imageResponse = device.Exchange(TurzxProtocol.CreateImageUpload(png), 102);
-            PrintResponse("UPLOAD_PNG", imageResponse);
+            device.Send(TurzxProtocol.CreateImageUpload(png));
+            Console.WriteLine("UPLOAD_PNG write completed.");
 
             Console.WriteLine("Test image sent. The operation did not update firmware.");
             return 0;

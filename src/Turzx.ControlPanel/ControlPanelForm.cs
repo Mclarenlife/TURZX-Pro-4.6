@@ -492,7 +492,7 @@ namespace Turzx.ControlPanel
                 using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
                 {
                     RequireSuccess(device.Exchange(TurzxProtocol.CreateCommand(10), 10), "同步");
-                    RequireSuccess(device.Exchange(TurzxProtocol.CreateImageUpload(png), 102), "发送画面");
+                    device.Send(TurzxProtocol.CreateImageUpload(png));
                     return string.Format("静态测试画面发送成功，共 {0:N0} 字节。", png.Length);
                 }
             });
@@ -519,8 +519,7 @@ namespace Turzx.ControlPanel
                             cancellation.ThrowIfCancellationRequested();
                             byte[] png = TestPattern.CreateLandscapePng(frame, 12);
                             TurzxProtocol.DescribePanelPng(png);
-                            RequireSuccess(device.Exchange(
-                                TurzxProtocol.CreateImageUpload(png), 102), "发送测试帧");
+                            device.Send(TurzxProtocol.CreateImageUpload(png));
 
                             int displayedFrame = frame + 1;
                             BeginInvoke(new Action(delegate
@@ -615,8 +614,7 @@ namespace Turzx.ControlPanel
                             sensors.Enrich(snapshot);
                             byte[] png = DashboardRenderer.CreateTransportPng(snapshot, ScreenAccent);
                             TurzxProtocol.DescribePanelPng(png);
-                            RequireSuccess(device.Exchange(
-                                TurzxProtocol.CreateImageUpload(png), 102), "发送实时画面");
+                            device.Send(TurzxProtocol.CreateImageUpload(png));
                             frameNumber++;
 
                             int displayedFrame = frameNumber;
@@ -749,8 +747,7 @@ namespace Turzx.ControlPanel
                     using (WinUsbDevice device = WinUsbDevice.Open(VendorId, ProductId))
                     {
                         RequireSuccess(device.Exchange(TurzxProtocol.CreateCommand(10), 10), "同步");
-                        RequireSuccess(device.Exchange(
-                            TurzxProtocol.CreateImageUpload(png), 102), "发送图片");
+                        device.Send(TurzxProtocol.CreateImageUpload(png));
                     }
                 });
 
@@ -839,8 +836,7 @@ namespace Turzx.ControlPanel
                             {
                                 TurzxProtocol.DescribePanelPng(png);
                             }
-                            RequireSuccess(device.Exchange(
-                                TurzxProtocol.CreateImageUpload(png), 102), "发送视频帧");
+                            device.Send(TurzxProtocol.CreateImageUpload(png));
                             frameCount++;
 
                             int displayedFrame = frameCount;

@@ -66,8 +66,14 @@ namespace Turzx.ProtocolProbe
             packet[2] = 0x1A;
             packet[3] = 0x6D;
 
-            uint millisecondsSinceMidnight = (uint)DateTime.Now.TimeOfDay.TotalMilliseconds;
-            byte[] timestamp = BitConverter.GetBytes(millisecondsSinceMidnight);
+            // The controller's cold-boot handshake validates the same 32-bit time
+            // field used by the factory application: UTC now minus local yesterday
+            // at midnight. Using milliseconds since the current midnight works only
+            // after another application has already initialized the controller.
+            DateTime protocolEpoch = DateTime.Today.AddDays(-1);
+            long protocolMilliseconds = Convert.ToInt64(
+                (DateTime.UtcNow - protocolEpoch).TotalMilliseconds);
+            byte[] timestamp = BitConverter.GetBytes(protocolMilliseconds);
             if (!BitConverter.IsLittleEndian)
             {
                 Array.Reverse(timestamp);
@@ -84,7 +90,7 @@ namespace Turzx.ProtocolProbe
                 des.Key = CipherKey;
                 des.IV = CipherKey;
                 des.Mode = CipherMode.CBC;
-                des.Padding = PaddingMode.Zeros;
+                des.Padding = PaddingMode.PKCS7;
                 using (ICryptoTransform encryptor = des.CreateEncryptor())
                 {
                     encrypted = encryptor.TransformFinalBlock(plain, 0, plain.Length);
